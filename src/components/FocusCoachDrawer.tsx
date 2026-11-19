@@ -1,12 +1,20 @@
 import { useEffect, useRef, useState } from 'react';
-import { AlertCircle, Bot, Loader2, Send, Trash2, X } from 'lucide-react';
+import { AlertCircle, Bot, Loader2, Send, Settings, Trash2, X } from 'lucide-react';
 import type { ChatMessage } from '../types/focus';
 import { STORAGE_KEYS } from '../utils/defaults';
+import {
+  COACH_MODELS,
+  type CoachModelId,
+  resolveGeminiApiKey,
+  sendFocusCoachMessage,
+} from '../services/geminiCoach';
 
 interface FocusCoachDrawerProps {
   open: boolean;
   onClose: () => void;
   focusContext: string;
+  geminiApiKey: string;
+  onOpenSettings: () => void;
 }
 
 const STARTER_PROMPTS = [
@@ -41,15 +49,18 @@ export function FocusCoachDrawer({
   open,
   onClose,
   focusContext,
+  geminiApiKey,
+  onOpenSettings,
 }: FocusCoachDrawerProps) {
   const [messages, setMessages] = useState<ChatMessage[]>(loadInitialMessages);
   const [input, setInput] = useState('');
-  const [model, setModel] = useState<'gemini-4-hydrogen' | 'gemini-3.1-flash-lite'>(
-    'gemini-4-hydrogen'
-  );
+  const [model, setModel] = useState<CoachModelId>(COACH_MODELS.standard);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const scrollEndRef = useRef<HTMLDivElement | null>(null);
+
+  const activeApiKey = resolveGeminiApiKey(geminiApiKey);
+  const hasApiKey = activeApiKey.length > 0;
 
   useEffect(() => {
     try {
@@ -65,11 +76,25 @@ export function FocusCoachDrawer({
     }
   }, [messages, open, sending]);
 
+  useEffect(() => {
+    if (hasApiKey && error?.includes('Gemini API key')) {
+      setError(null);
+    }
+  }, [hasApiKey, error]);
+
   if (!open) return null;
 
   const sendMessage = async (textOverride?: string) => {
     const content = (textOverride ?? input).trim();
     if (!content || sending) return;
+
+    const resolvedKey = resolveGeminiApiKey(geminiApiKey);
+    if (!resolvedKey) {
+      setError(
+        'No Gemini API key is set. Open Settings → API Keys and add your Gemini API key to chat with Focus Coach.'
+      );
+      return;
+    }
 
     setError(null);
     const userMsg: ChatMessage = {
@@ -88,29 +113,20 @@ export function FocusCoachDrawer({
     setSending(true);
 
     try {
-      const response = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: content,
-          history: historyForApi,
-          model,
-          focusContext,
-        }),
+      const result = await sendFocusCoachMessage({
+        apiKey: resolvedKey,
+        model,
+        message: content,
+        history: historyForApi,
+        focusContext,
       });
-
-      const data = (await response.json()) as { reply?: string; error?: string; model?: string };
-
-      if (!response.ok || !data.reply) {
-        throw new Error(data.error || `Chat request failed (${response.status})`);
-      }
 
       const replyMsg: ChatMessage = {
         id: `model-${Date.now()}`,
         role: 'model',
-        text: data.reply,
+        text: result.reply,
         timestamp: new Date().toISOString(),
-        model: data.model || model,
+        model: result.model,
       };
       setMessages((prev) => [...prev, replyMsg]);
     } catch (err) {
@@ -178,13 +194,16 @@ export function FocusCoachDrawer({
 
         {/* Model Selector Bar */}
         <div className="px-5 py-2.5 border-b border-slate-200 dark:border-[#1E2330] bg-slate-50/70 dark:bg-[#0E1117] flex items-center justify-between gap-2">
-          <span className="text-[11px] text-slate-500 dark:text-slate-400">Model mode</span>
+          <span className="text-[11px] text-slate-500 dark:text-slate-400 whitespace-nowrap">
+            Model mode
+          </span>
           <div className="inline-flex items-center p-0.5 rounded-lg bg-slate-200/70 dark:bg-[#181C26]">
             <button
               type="button"
-              onClick={() => setModel('gemini-4-hydrogen')}
+              onClick={() => setModel(COACH_MODELS.standard)}
+              title="gemini-4-hydrogen"
               className={`px-2.5 py-1 text-[11px] font-medium rounded-md transition-colors cursor-pointer whitespace-nowrap ${
-                model === 'gemini-4-hydrogen'
+                model === COACH_MODELS.standard
                   ? 'bg-white dark:bg-[#242B3A] text-slate-900 dark:text-slate-100 shadow-xs'
                   : 'text-slate-600 dark:text-slate-400'
               }`}
@@ -193,9 +212,10 @@ export function FocusCoachDrawer({
             </button>
             <button
               type="button"
-              onClick={() => setModel('gemini-3.1-flash-lite')}
+              onClick={() => setModel(COACH_MODELS.fast)}
+              title="gemini-3.1-flash-lite"
               className={`px-2.5 py-1 text-[11px] font-medium rounded-md transition-colors cursor-pointer whitespace-nowrap ${
-                model === 'gemini-3.1-flash-lite'
+                model === COACH_MODELS.fast
                   ? 'bg-white dark:bg-[#242B3A] text-slate-900 dark:text-slate-100 shadow-xs'
                   : 'text-slate-600 dark:text-slate-400'
               }`}
@@ -207,6 +227,29 @@ export function FocusCoachDrawer({
 
         {/* Scrollable Message Thread */}
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+          {/* Missing API Key Banner */}
+          {!hasApiKey && (
+            <div
+              role="status"
+              className="rounded-xl p-3.5 text-xs bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/60 text-amber-800 dark:text-amber-200 space-y-2.5"
+            >
+              <div className="flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" aria-hidden="true" />
+                <div className="leading-relaxed">
+                  Add your <strong className="font-semibold">Gemini API Key</strong> in Settings to enable Focus Coach. Your key stays in local browser storage and calls Gemini directly.
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={onOpenSettings}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-amber-600 text-white hover:bg-amber-500 transition-colors cursor-pointer whitespace-nowrap"
+              >
+                <Settings className="w-3.5 h-3.5" aria-hidden="true" />
+                Open Settings
+              </button>
+            </div>
+          )}
+
           {messages.map((msg) => {
             const isUser = msg.role === 'user';
             return (
@@ -239,10 +282,22 @@ export function FocusCoachDrawer({
           {error && (
             <div
               role="alert"
-              className="flex items-start gap-2 rounded-xl px-3.5 py-2.5 text-xs bg-rose-50 dark:bg-rose-950/35 border border-rose-200 dark:border-rose-900/60 text-rose-700 dark:text-rose-300"
+              className="rounded-xl px-3.5 py-2.5 text-xs bg-rose-50 dark:bg-rose-950/35 border border-rose-200 dark:border-rose-900/60 text-rose-700 dark:text-rose-300 space-y-2"
             >
-              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" aria-hidden="true" />
-              <span>{error}</span>
+              <div className="flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" aria-hidden="true" />
+                <span className="leading-relaxed">{error}</span>
+              </div>
+              {error.toLowerCase().includes('api key') && (
+                <button
+                  type="button"
+                  onClick={onOpenSettings}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-medium rounded-md bg-rose-600 text-white hover:bg-rose-500 transition-colors cursor-pointer whitespace-nowrap"
+                >
+                  <Settings className="w-3 h-3" aria-hidden="true" />
+                  Add Key in Settings
+                </button>
+              )}
             </div>
           )}
 
@@ -291,7 +346,11 @@ export function FocusCoachDrawer({
                   sendMessage();
                 }
               }}
-              placeholder="Ask about your streak, subjects, or schedule…"
+              placeholder={
+                hasApiKey
+                  ? 'Ask about your streak, subjects, or schedule…'
+                  : 'Add your Gemini API key in Settings to start chatting…'
+              }
               className="flex-1 resize-none px-3 py-2 text-xs rounded-lg bg-white dark:bg-[#171B24] border border-slate-200 dark:border-[#242B3A] text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500"
             />
             <button

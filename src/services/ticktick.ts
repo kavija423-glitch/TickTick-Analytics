@@ -14,6 +14,7 @@ import {
   resolveSessionSubject,
 } from '../utils/analytics';
 import { STORAGE_KEYS } from '../utils/defaults';
+import { HttpResponseError, parseJsonResponseSafely } from '../utils/http';
 
 const TICKTICK_DIRECT_BASE = 'https://api.ticktick.com/open/v1';
 
@@ -240,29 +241,27 @@ async function tickTickFetch<T>(
   }
 
   if (response.status === 401 || response.status === 403) {
+    const rawDetail = await response.text().catch(() => '');
+    const suffix = rawDetail.trim() ? ` (${rawDetail.trim().slice(0, 120)})` : '';
     throw {
       code: 'AUTH',
-      title: 'Invalid or Expired TickTick Token',
-      message: `TickTick rejected the token (HTTP ${response.status}). Verify your Personal API Token in Settings.`,
+      title: `Invalid or Expired TickTick Token (HTTP ${response.status})`,
+      message: `TickTick rejected the token (HTTP ${response.status})${suffix}. Verify your Personal API Token in Settings.`,
     } satisfies SyncError;
   }
 
-  if (!response.ok) {
-    let detail = '';
-    try {
-      const json = (await response.json()) as { error?: string; errorMessage?: string };
-      detail = json.error || json.errorMessage || '';
-    } catch {
-      detail = await response.text().catch(() => '');
+  try {
+    return await parseJsonResponseSafely<T>(response, `TickTick ${endpoint}`);
+  } catch (err) {
+    if (err instanceof HttpResponseError) {
+      throw {
+        code: 'API',
+        title: `TickTick API Error (HTTP ${err.status})`,
+        message: err.message,
+      } satisfies SyncError;
     }
-    throw {
-      code: 'API',
-      title: `TickTick API Error (${response.status})`,
-      message: detail || `Request to ${endpoint} failed with status ${response.status}.`,
-    } satisfies SyncError;
+    throw normalizeTickTickError(err, settings.connectionMode);
   }
-
-  return (await response.json()) as T;
 }
 
 /**

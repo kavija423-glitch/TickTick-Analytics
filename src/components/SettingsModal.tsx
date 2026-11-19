@@ -74,6 +74,7 @@ export function SettingsModal({
   const [activeTab, setActiveTab] = useState<SettingsTab>('connection');
   const [draft, setDraft] = useState<AppSettings>(settings);
   const [showToken, setShowToken] = useState(false);
+  const [showGeminiKey, setShowGeminiKey] = useState(false);
   const [cacheClearedMsg, setCacheClearedMsg] = useState(false);
   const [resyncTokenError, setResyncTokenError] = useState(false);
 
@@ -156,7 +157,7 @@ export function SettingsModal({
               Settings
             </h2>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-              Configure TickTick API connection, sync intervals, daily goal, and subject mapping.
+              Configure API keys, sync intervals, daily focus goal, and subject mapping.
             </p>
           </div>
           <button
@@ -177,7 +178,7 @@ export function SettingsModal({
         >
           {(
             [
-              { id: 'connection', label: 'TickTick API' },
+              { id: 'connection', label: 'API Keys' },
               { id: 'sync', label: 'Sync & Goals' },
               { id: 'subjects', label: 'Subject Mapping' },
             ] as const
@@ -245,6 +246,52 @@ export function SettingsModal({
                 </div>
                 <p className="mt-1.5 text-[11px] text-slate-500 dark:text-slate-400">
                   Stored locally in your browser&apos;s <code className="font-mono">localStorage</code> and sent only via the <code className="font-mono">Authorization: Bearer</code> header.
+                </p>
+              </div>
+
+              {/* Optional Gemini API Key */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label
+                    htmlFor="gemini-api-key-input"
+                    className="text-xs font-medium text-slate-900 dark:text-slate-100"
+                  >
+                    Gemini API Key{' '}
+                    <span className="font-normal text-slate-500 dark:text-slate-400">(Optional)</span>
+                  </label>
+                  {draft.geminiApiKey && (
+                    <button
+                      type="button"
+                      onClick={() => setDraft((prev) => ({ ...prev, geminiApiKey: '' }))}
+                      className="text-xs text-rose-600 dark:text-rose-400 hover:underline cursor-pointer"
+                    >
+                      Clear key
+                    </button>
+                  )}
+                </div>
+                <div className="relative">
+                  <input
+                    id="gemini-api-key-input"
+                    type={showGeminiKey ? 'text' : 'password'}
+                    value={draft.geminiApiKey}
+                    onChange={(e) =>
+                      setDraft((prev) => ({ ...prev, geminiApiKey: e.target.value }))
+                    }
+                    placeholder="Paste your Gemini API key (AIza…) for Focus Coach…"
+                    autoComplete="off"
+                    className="w-full pr-10 pl-3 py-2 text-xs font-mono rounded-lg bg-slate-50 dark:bg-[#171B24] border border-slate-200 dark:border-[#242B3A] text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowGeminiKey((s) => !s)}
+                    aria-label={showGeminiKey ? 'Hide Gemini API key' : 'Show Gemini API key'}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 cursor-pointer"
+                  >
+                    {showGeminiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+                <p className="mt-1.5 text-[11px] text-slate-500 dark:text-slate-400">
+                  Stored locally in <code className="font-mono">localStorage</code> and used directly from your browser for Focus Coach (<code className="font-mono">gemini-4-hydrogen</code> / <code className="font-mono">gemini-3.1-flash-lite</code>). Required on static deployments like Cloudflare Pages.
                 </p>
               </div>
 
@@ -454,7 +501,7 @@ export function SettingsModal({
                       }}
                       className="font-medium underline whitespace-nowrap shrink-0 cursor-pointer"
                     >
-                      Go to TickTick API
+                      Go to API Keys
                     </button>
                   </div>
                 )}

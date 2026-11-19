@@ -47,6 +47,7 @@ export interface SubjectRule {
 
 export interface AppSettings {
   apiToken: string;
+  geminiApiKey: string;
   connectionMode: ConnectionMode;
   customProxyUrl: string;
   autoRefreshMinutes: AutoRefreshInterval;

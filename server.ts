@@ -96,7 +96,7 @@ app.post('/api/chat', async (req, res) => {
   if (!apiKey) {
     res.status(503).json({
       error:
-        'Gemini API key is not configured on the server. Add GEMINI_API_KEY in Settings > Secrets to enable Focus Coach.',
+        'Gemini API key is not configured on the server. Add your Gemini API key in Settings.',
     });
     return;
   }

@@ -885,6 +885,11 @@ export default function App() {
         open={coachOpen}
         onClose={() => setCoachOpen(false)}
         focusContext={focusCoachContext}
+        geminiApiKey={settings.geminiApiKey}
+        onOpenSettings={() => {
+          setCoachOpen(false);
+          setSettingsOpen(true);
+        }}
       />
     </div>
   );

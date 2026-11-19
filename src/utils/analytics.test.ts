@@ -19,6 +19,8 @@ import {
 import { DEFAULT_SUBJECT_RULES } from './defaults';
 import { generateDemoSessions } from './demoData';
 import { computeFocusedDurationMinutes, normalizeFocusRecord } from '../services/ticktick';
+import { HttpResponseError, parseJsonResponseSafely } from './http';
+import { COACH_MODELS, formatGeminiError, resolveGeminiApiKey } from '../services/geminiCoach';
 import type { FocusSession } from '../types/focus';
 
 function makeSession(overrides: Partial<FocusSession> & { id: string; startTime: string; durationMinutes: number }): FocusSession {
@@ -290,4 +292,121 @@ test('normalizeFocusRecord tags Pomodoro (type=0) and Stopwatch (type=1) and ded
       ['sess-pomo-1', 'Pomodoro', 50],
     ]
   );
+});
+
+test('parseJsonResponseSafely reads raw text first and reports status + real error on empty/HTML/JSON failures', async () => {
+  // 1. Valid JSON 200 response
+  const okData = await parseJsonResponseSafely<{ hello: string }>(
+    {
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      text: async () => '{"hello":"world"}',
+    },
+    'TickTick /focus'
+  );
+  assert.deepEqual(okData, { hello: 'world' });
+
+  // 2. Empty 404 body (classic Cloudflare Pages missing /api/* route)
+  await assert.rejects(
+    () =>
+      parseJsonResponseSafely(
+        {
+          ok: false,
+          status: 404,
+          statusText: 'Not Found',
+          text: async () => '',
+        },
+        'Focus Coach'
+      ),
+    (err: unknown) => {
+      assert.ok(err instanceof HttpResponseError);
+      assert.equal(err.status, 404);
+      assert.match(err.message, /404 Not Found/);
+      assert.match(err.message, /empty response body/i);
+      return true;
+    }
+  );
+
+  // 3. HTML 502 gateway error page
+  await assert.rejects(
+    () =>
+      parseJsonResponseSafely(
+        {
+          ok: false,
+          status: 502,
+          statusText: 'Bad Gateway',
+          text: async () => '<html><body><h1>502 Bad Gateway</h1><p>Upstream unavailable</p></body></html>',
+        },
+        'TickTick /project'
+      ),
+    (err: unknown) => {
+      assert.ok(err instanceof HttpResponseError);
+      assert.equal(err.status, 502);
+      assert.match(err.message, /502 Bad Gateway/);
+      assert.match(err.message, /Upstream unavailable/);
+      return true;
+    }
+  );
+
+  // 4. JSON error payload
+  await assert.rejects(
+    () =>
+      parseJsonResponseSafely(
+        {
+          ok: false,
+          status: 429,
+          statusText: 'Too Many Requests',
+          text: async () => JSON.stringify({ error: { message: 'Rate limit exceeded' } }),
+        },
+        'TickTick /focus'
+      ),
+    (err: unknown) => {
+      assert.ok(err instanceof HttpResponseError);
+      assert.equal(err.status, 429);
+      assert.match(err.message, /429/);
+      assert.match(err.message, /Rate limit exceeded/);
+      return true;
+    }
+  );
+
+  // 5. 200 OK with empty or non-JSON body never throws raw SyntaxError
+  await assert.rejects(
+    () =>
+      parseJsonResponseSafely(
+        {
+          ok: true,
+          status: 200,
+          statusText: 'OK',
+          text: async () => '   ',
+        },
+        'TickTick /focus'
+      ),
+    (err: unknown) => {
+      assert.ok(err instanceof HttpResponseError);
+      assert.match(err.message, /empty response/i);
+      return true;
+    }
+  );
+});
+
+test('resolveGeminiApiKey prefers localStorage key and only falls back to env key in AI Studio preview', () => {
+  assert.equal(COACH_MODELS.standard, 'gemini-4-hydrogen');
+  assert.equal(COACH_MODELS.fast, 'gemini-3.1-flash-lite');
+
+  // Prefers stored key in both preview and production
+  assert.equal(resolveGeminiApiKey('AIza-user-key', 'AIza-env-key', true), 'AIza-user-key');
+  assert.equal(resolveGeminiApiKey('AIza-user-key', 'AIza-env-key', false), 'AIza-user-key');
+
+  // Falls back to env key ONLY in preview
+  assert.equal(resolveGeminiApiKey('', 'AIza-env-key', true), 'AIza-env-key');
+  assert.equal(resolveGeminiApiKey('', 'AIza-env-key', false), '');
+
+  // Formats Gemini ApiError payloads cleanly
+  const formatted = formatGeminiError({
+    status: 400,
+    message: JSON.stringify({ error: { code: 400, message: 'API key not valid. Please pass a valid API key.' } }),
+  });
+  assert.match(formatted, /HTTP 400/);
+  assert.match(formatted, /API key not valid/);
 });

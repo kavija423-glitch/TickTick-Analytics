@@ -90,6 +90,7 @@ export const DEFAULT_SUBJECT_RULES: SubjectRule[] = [
 
 export const DEFAULT_SETTINGS: AppSettings = {
   apiToken: '',
+  geminiApiKey: '',
   connectionMode: 'proxy',
   customProxyUrl: '',
   autoRefreshMinutes: 10,
