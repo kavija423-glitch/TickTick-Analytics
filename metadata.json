@@ -1,0 +1,6 @@
+{
+  "name": "Cadence Focus Analytics",
+  "description": "Personal TickTick Focus & Pomodoro Analytics Dashboard with auto-sync, activity heatmaps, deep work analysis, and AI study coach.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
