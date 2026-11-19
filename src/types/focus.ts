@@ -18,11 +18,14 @@ export interface TickTickProject {
   color?: string;
 }
 
+export type TimerMode = 'Pomodoro' | 'Stopwatch';
+
 export interface FocusSession {
   id: string;
   startTime: string; // ISO string
   endTime: string; // ISO string
   durationMinutes: number;
+  timerMode: TimerMode;
   title: string;
   note: string;
   projectId?: string;

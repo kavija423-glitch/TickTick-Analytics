@@ -4,6 +4,7 @@ import type {
   SyncError,
   SyncProgress,
   TickTickProject,
+  TimerMode,
 } from '../types/focus';
 import {
   addLocalDays,
@@ -16,26 +17,126 @@ import { STORAGE_KEYS } from '../utils/defaults';
 
 const TICKTICK_DIRECT_BASE = 'https://api.ticktick.com/open/v1';
 
-interface RawTickTickFocusTask {
+export interface RawTickTickFocusTask {
   title?: string;
   projectId?: string;
   taskId?: string;
   tags?: string[];
   startTime?: string;
   endTime?: string;
+  duration?: number;
 }
 
-interface RawTickTickFocusRecord {
+export interface RawTickTickPause {
+  startTime?: string;
+  endTime?: string;
+  duration?: number;
+}
+
+export interface RawTickTickFocusRecord {
   id?: string;
   startTime?: string;
   endTime?: string;
-  duration?: number; // seconds or milliseconds depending on endpoint variant
+  /** Actual focused duration returned by TickTick API (typically in seconds, excluding pauses). */
+  duration?: number;
+  focusDuration?: number;
+  actualDuration?: number;
+  /** Optional paused duration returned by some TickTick API variants (seconds or ms). */
+  pauseDuration?: number;
+  pausedDuration?: number;
+  pauses?: RawTickTickPause[];
+  /** TickTick timer type: 0 = Pomodoro, 1 = Stopwatch */
+  type?: number;
   note?: string;
   title?: string;
   projectId?: string;
   tags?: string[];
   status?: number;
   tasks?: RawTickTickFocusTask[];
+}
+
+function toMinutesFromSecondsOrMs(value: number): number {
+  if (!Number.isFinite(value) || value <= 0) return 0;
+  // Values > 86,400 cannot realistically be seconds for a single session (>24h), so treat as ms
+  const minutes = value > 86_400 ? value / 60_000 : value / 60;
+  return Math.max(1, Math.round(minutes));
+}
+
+function toMsFromSecondsOrMs(value: number): number {
+  if (!Number.isFinite(value) || value <= 0) return 0;
+  return value > 86_400 ? value : value * 1000;
+}
+
+/**
+ * Computes actual focused duration in minutes, prioritizing the API's focused duration
+ * (excluding paused time) rather than blindly subtracting startTime from endTime.
+ */
+export function computeFocusedDurationMinutes(raw: RawTickTickFocusRecord): number {
+  // 1. Prefer explicit focused duration fields from TickTick API (already exclude paused intervals)
+  const explicitFocusDuration =
+    typeof raw.focusDuration === 'number' && raw.focusDuration > 0
+      ? raw.focusDuration
+      : typeof raw.actualDuration === 'number' && raw.actualDuration > 0
+        ? raw.actualDuration
+        : typeof raw.duration === 'number' && raw.duration > 0
+          ? raw.duration
+          : null;
+
+  if (explicitFocusDuration !== null) {
+    return toMinutesFromSecondsOrMs(explicitFocusDuration);
+  }
+
+  // 2. If tasks[] carries active focus slices with individual durations or timestamps, sum them
+  if (Array.isArray(raw.tasks) && raw.tasks.length > 0) {
+    let taskDurationMs = 0;
+    for (const t of raw.tasks) {
+      if (typeof t.duration === 'number' && t.duration > 0) {
+        taskDurationMs += toMsFromSecondsOrMs(t.duration);
+      } else if (t.startTime && t.endTime) {
+        const s = new Date(t.startTime).getTime();
+        const e = new Date(t.endTime).getTime();
+        if (!Number.isNaN(s) && !Number.isNaN(e) && e > s) {
+          taskDurationMs += e - s;
+        }
+      }
+    }
+    if (taskDurationMs > 0) {
+      return Math.max(1, Math.round(taskDurationMs / 60_000));
+    }
+  }
+
+  // 3. Fall back to wall-clock span minus any recorded pause duration / pause intervals
+  if (raw.startTime && raw.endTime) {
+    const startMs = new Date(raw.startTime).getTime();
+    const endMs = new Date(raw.endTime).getTime();
+    if (!Number.isNaN(startMs) && !Number.isNaN(endMs) && endMs > startMs) {
+      let pauseMs = 0;
+      if (typeof raw.pauseDuration === 'number' && raw.pauseDuration > 0) {
+        pauseMs = toMsFromSecondsOrMs(raw.pauseDuration);
+      } else if (typeof raw.pausedDuration === 'number' && raw.pausedDuration > 0) {
+        pauseMs = toMsFromSecondsOrMs(raw.pausedDuration);
+      } else if (Array.isArray(raw.pauses) && raw.pauses.length > 0) {
+        for (const p of raw.pauses) {
+          if (typeof p.duration === 'number' && p.duration > 0) {
+            pauseMs += toMsFromSecondsOrMs(p.duration);
+          } else if (p.startTime && p.endTime) {
+            const ps = new Date(p.startTime).getTime();
+            const pe = new Date(p.endTime).getTime();
+            if (!Number.isNaN(ps) && !Number.isNaN(pe) && pe > ps) {
+              pauseMs += pe - ps;
+            }
+          }
+        }
+      }
+
+      const activeMs = Math.max(0, endMs - startMs - pauseMs);
+      if (activeMs > 0) {
+        return Math.max(1, Math.round(activeMs / 60_000));
+      }
+    }
+  }
+
+  return 0;
 }
 
 function buildRequestUrl(
@@ -98,7 +199,7 @@ function normalizeTickTickError(err: unknown, mode: AppSettings['connectionMode'
       title: 'Blocked by Browser CORS Policy',
       message:
         'TickTick Open API does not allow direct browser requests. Switch Connection Mode to "Built-in Proxy (/api/ticktick)" in Settings.',
-      hint: 'Open Settings → API Connection → select Built-in Proxy.',
+      hint: 'Open Settings → TickTick API → select Built-in Proxy.',
     };
   }
 
@@ -166,34 +267,32 @@ async function tickTickFetch<T>(
 
 /**
  * Normalizes a raw TickTick /open/v1/focus record into our internal FocusSession schema.
+ * Prioritizes the API's actual focused duration (excluding pauses) and tags each record
+ * as either 'Pomodoro' (type=0) or 'Stopwatch' (type=1).
  */
 export function normalizeFocusRecord(
   raw: RawTickTickFocusRecord,
   settings: Pick<AppSettings, 'subjectRules'>,
-  projectNameById: Record<string, string>
+  projectNameById: Record<string, string>,
+  fallbackTimerMode: TimerMode = 'Pomodoro'
 ): FocusSession | null {
   const startRaw = raw.startTime;
-  const endRaw = raw.endTime;
   if (!startRaw) return null;
 
   const startDate = new Date(startRaw);
   if (Number.isNaN(startDate.getTime())) return null;
 
-  let endDate = endRaw ? new Date(endRaw) : null;
-  let durationMinutes = 0;
+  const durationMinutes = computeFocusedDurationMinutes(raw);
+  if (durationMinutes <= 0) return null;
 
-  if (endDate && !Number.isNaN(endDate.getTime()) && endDate.getTime() > startDate.getTime()) {
-    durationMinutes = Math.round((endDate.getTime() - startDate.getTime()) / 60_000);
-  } else if (typeof raw.duration === 'number' && raw.duration > 0) {
-    // TickTick duration may be seconds (or ms if very large)
-    durationMinutes =
-      raw.duration > 86_400
-        ? Math.round(raw.duration / 60_000)
-        : Math.round(raw.duration / 60);
-    endDate = new Date(startDate.getTime() + durationMinutes * 60_000);
-  }
+  const parsedEnd = raw.endTime ? new Date(raw.endTime) : null;
+  const endDate =
+    parsedEnd && !Number.isNaN(parsedEnd.getTime()) && parsedEnd.getTime() > startDate.getTime()
+      ? parsedEnd
+      : new Date(startDate.getTime() + durationMinutes * 60_000);
 
-  if (durationMinutes <= 0 || !endDate) return null;
+  const timerMode: TimerMode =
+    raw.type === 1 ? 'Stopwatch' : raw.type === 0 ? 'Pomodoro' : fallbackTimerMode;
 
   const firstTask = Array.isArray(raw.tasks) && raw.tasks.length > 0 ? raw.tasks[0] : undefined;
   const projectId = raw.projectId || firstTask?.projectId;
@@ -206,7 +305,7 @@ export function normalizeFocusRecord(
       ? firstTask.tags
       : [];
 
-  const id = raw.id || `tt-${startDate.getTime()}-${durationMinutes}`;
+  const id = raw.id || `tt-${timerMode.toLowerCase()}-${startDate.getTime()}-${durationMinutes}`;
 
   const draft = {
     title,
@@ -221,6 +320,7 @@ export function normalizeFocusRecord(
     startTime: startDate.toISOString(),
     endTime: endDate.toISOString(),
     durationMinutes,
+    timerMode,
     title,
     note,
     projectId,
@@ -231,12 +331,36 @@ export function normalizeFocusRecord(
   };
 }
 
+function extractFocusArray(
+  data: RawTickTickFocusRecord[] | { records?: RawTickTickFocusRecord[]; data?: RawTickTickFocusRecord[] }
+): RawTickTickFocusRecord[] {
+  if (Array.isArray(data)) return data;
+  if (Array.isArray(data?.records)) return data.records;
+  if (Array.isArray(data?.data)) return data.data;
+  return [];
+}
+
+export function clearTickTickLocalCache(): void {
+  try {
+    localStorage.removeItem(STORAGE_KEYS.SESSION_CACHE);
+    localStorage.removeItem(STORAGE_KEYS.PROJECTS_CACHE);
+    localStorage.removeItem(STORAGE_KEYS.LAST_SYNCED);
+    localStorage.removeItem(STORAGE_KEYS.SYNCED_MONTHS);
+  } catch {
+    // Ignore storage errors
+  }
+}
+
 export function loadCachedSessions(): FocusSession[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.SESSION_CACHE);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? (parsed as FocusSession[]) : [];
+    if (!Array.isArray(parsed)) return [];
+    return (parsed as FocusSession[]).map((s) => ({
+      ...s,
+      timerMode: s.timerMode ?? 'Pomodoro',
+    }));
   } catch {
     return [];
   }
@@ -277,10 +401,11 @@ export interface SyncResult {
 }
 
 /**
- * Syncs TickTick projects and focus records.
+ * Syncs TickTick projects and BOTH Pomodoro (type=0) & Stopwatch (type=1) focus records.
  * - `mode: 'recent'` fetches only the latest 30-day window (used on startup & auto-refresh).
- * - `mode: 'full'` splits the past 6–12 months into sequential 30-day chunks, skipping already-cached
- *   historical chunks unless `forceFull` is true, and merges/deduplicates by session ID.
+ * - `mode: 'full'` splits the past 6–12 months into sequential 30-day chunks, fetching type=0
+ *   and type=1 in parallel for every chunk, and merges/deduplicates by session ID.
+ * - `forceFull: true` clears the localStorage cache first so all chunks are re-fetched cleanly.
  */
 export async function syncTickTickData(options: {
   settings: AppSettings;
@@ -291,6 +416,10 @@ export async function syncTickTickData(options: {
   const { settings, mode, forceFull = false, onProgress } = options;
   const now = new Date();
 
+  if (forceFull) {
+    clearTickTickLocalCache();
+  }
+
   onProgress?.({
     active: true,
     currentChunk: 0,
@@ -299,7 +428,7 @@ export async function syncTickTickData(options: {
   });
 
   // 1. Fetch projects to map projectId -> projectName
-  let projects = loadCachedProjects();
+  let projects = forceFull ? [] : loadCachedProjects();
   try {
     const remoteProjects = await tickTickFetch<TickTickProject[]>(settings, '/project');
     if (Array.isArray(remoteProjects)) {
@@ -307,7 +436,6 @@ export async function syncTickTickData(options: {
       saveCachedProjects(projects);
     }
   } catch (err) {
-    // Re-throw auth/CORS/config errors immediately so the user sees why sync failed
     const normalized = normalizeTickTickError(err, settings.connectionMode);
     if (normalized.code === 'AUTH' || normalized.code === 'CORS' || normalized.code === 'CONFIG') {
       throw normalized;
@@ -319,12 +447,11 @@ export async function syncTickTickData(options: {
     if (p.id && p.name) projectNameById[p.id] = p.name;
   }
 
-  // 2. Build 30-day chunks
+  // 2. Build sequential 30-day chunks
   const daysBack = mode === 'recent' ? 30 : settings.historyMonths * 30;
   const fromDate = addLocalDays(now, -daysBack);
   const allChunks = buildDateChunks(fromDate, now, 30);
 
-  // Determine which historical chunks are already cached
   let cachedChunkKeys = new Set<string>();
   if (!forceFull && mode === 'full') {
     try {
@@ -335,7 +462,6 @@ export async function syncTickTickData(options: {
     }
   }
 
-  // Always refresh the most recent chunk; skip older cached chunks unless forced
   const chunksToFetch = allChunks.filter((chunk, idx) => {
     const isLatest = idx === allChunks.length - 1;
     if (isLatest || forceFull || mode === 'recent') return true;
@@ -351,37 +477,46 @@ export async function syncTickTickData(options: {
       active: true,
       currentChunk: i + 1,
       totalChunks: chunksToFetch.length,
-      label: `Syncing ${chunk.label} (${i + 1}/${chunksToFetch.length})…`,
+      label: `Syncing Pomodoro & Stopwatch · ${chunk.label} (${i + 1}/${chunksToFetch.length})…`,
     });
 
-    const data = await tickTickFetch<
-      RawTickTickFocusRecord[] | { records?: RawTickTickFocusRecord[]; data?: RawTickTickFocusRecord[] }
-    >(settings, '/focus', {
-      from: chunk.from,
-      to: chunk.to,
-      type: '0',
-    });
+    type FocusResponse =
+      | RawTickTickFocusRecord[]
+      | { records?: RawTickTickFocusRecord[]; data?: RawTickTickFocusRecord[] };
 
-    const records: RawTickTickFocusRecord[] = Array.isArray(data)
-      ? data
-      : Array.isArray(data?.records)
-        ? data.records
-        : Array.isArray(data?.data)
-          ? data.data
-          : [];
+    // Fetch Pomodoro (type=0) AND Stopwatch (type=1) in parallel for each 30-day chunk
+    const [pomodoroData, stopwatchData] = await Promise.all([
+      tickTickFetch<FocusResponse>(settings, '/focus', {
+        from: chunk.from,
+        to: chunk.to,
+        type: '0',
+      }),
+      tickTickFetch<FocusResponse>(settings, '/focus', {
+        from: chunk.from,
+        to: chunk.to,
+        type: '1',
+      }),
+    ]);
 
-    for (const raw of records) {
-      const normalized = normalizeFocusRecord(raw, settings, projectNameById);
+    const pomodoroRecords = extractFocusArray(pomodoroData);
+    const stopwatchRecords = extractFocusArray(stopwatchData);
+
+    for (const raw of pomodoroRecords) {
+      const normalized = normalizeFocusRecord(raw, settings, projectNameById, 'Pomodoro');
       if (normalized) incoming.push(normalized);
     }
 
-    // Mark historical chunk as cached (except the current open chunk)
+    for (const raw of stopwatchRecords) {
+      const normalized = normalizeFocusRecord(raw, settings, projectNameById, 'Stopwatch');
+      if (normalized) incoming.push(normalized);
+    }
+
     if (i < chunksToFetch.length - 1) {
       cachedChunkKeys.add(chunk.from.slice(0, 10));
     }
   }
 
-  const existing = loadCachedSessions();
+  const existing = forceFull ? [] : loadCachedSessions();
   const merged = applySubjectRules(
     mergeAndDeduplicateSessions(existing, incoming),
     settings.subjectRules,

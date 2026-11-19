@@ -22,6 +22,7 @@ interface SettingsModalProps {
   onClose: () => void;
   onSave: (nextSettings: AppSettings) => void;
   onTriggerFullSync: (nextSettings: AppSettings) => void;
+  onForceFullResync: (nextSettings: AppSettings) => void;
   onClearCache: () => void;
 }
 
@@ -67,12 +68,14 @@ export function SettingsModal({
   onClose,
   onSave,
   onTriggerFullSync,
+  onForceFullResync,
   onClearCache,
 }: SettingsModalProps) {
   const [activeTab, setActiveTab] = useState<SettingsTab>('connection');
   const [draft, setDraft] = useState<AppSettings>(settings);
   const [showToken, setShowToken] = useState(false);
   const [cacheClearedMsg, setCacheClearedMsg] = useState(false);
+  const [resyncTokenError, setResyncTokenError] = useState(false);
 
   if (!open) return null;
 
@@ -117,6 +120,18 @@ export function SettingsModal({
     onSave(next);
     onClose();
     onTriggerFullSync(next);
+  };
+
+  const handleForceFullResync = () => {
+    if (!draft.apiToken.trim()) {
+      setResyncTokenError(true);
+      return;
+    }
+    setResyncTokenError(false);
+    const next = { ...draft, demoMode: false };
+    onSave(next);
+    onClose();
+    onForceFullResync(next);
   };
 
   return (
@@ -389,29 +404,60 @@ export function SettingsModal({
                 </div>
               </div>
 
-              {/* Local Cache Controls */}
-              <div className="pt-4 border-t border-slate-200 dark:border-[#1E2330] flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <div className="text-xs font-medium text-slate-900 dark:text-slate-100">
-                    Local Session Cache
+              {/* Local Cache & Force Full Resync Controls */}
+              <div className="pt-4 border-t border-slate-200 dark:border-[#1E2330] space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <div className="text-xs font-medium text-slate-900 dark:text-slate-100">
+                      Local Session Cache & Resync
+                    </div>
+                    <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                      {cacheClearedMsg
+                        ? 'Cached TickTick records cleared.'
+                        : 'Fetches both Pomodoro (type=0) & Stopwatch (type=1) sessions per 30-day chunk and deduplicates by ID.'}
+                    </div>
                   </div>
-                  <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
-                    {cacheClearedMsg
-                      ? 'Cached TickTick records cleared.'
-                      : 'Historical months are cached in localStorage and deduplicated by session ID.'}
+                  <div className="flex flex-wrap items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={handleForceFullResync}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-indigo-500/40 bg-indigo-500/10 text-indigo-600 dark:text-indigo-300 hover:bg-indigo-500/20 transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" aria-hidden="true" />
+                      Force Full Resync
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onClearCache();
+                        setCacheClearedMsg(true);
+                      }}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-rose-200 dark:border-rose-900/60 text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
+                      Clear Cache
+                    </button>
                   </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    onClearCache();
-                    setCacheClearedMsg(true);
-                  }}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-rose-200 dark:border-rose-900/60 text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-colors cursor-pointer whitespace-nowrap shrink-0"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                  Clear Cached Data
-                </button>
+
+                {resyncTokenError && (
+                  <div
+                    role="alert"
+                    className="rounded-lg px-3 py-2 text-xs bg-rose-50 dark:bg-rose-950/35 border border-rose-200 dark:border-rose-900/60 text-rose-700 dark:text-rose-300 flex items-center justify-between gap-2"
+                  >
+                    <span>Add your TickTick Personal API Token before running a Force Full Resync.</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setResyncTokenError(false);
+                        setActiveTab('connection');
+                      }}
+                      className="font-medium underline whitespace-nowrap shrink-0 cursor-pointer"
+                    >
+                      Go to TickTick API
+                    </button>
+                  </div>
+                )}
               </div>
             </>
           )}

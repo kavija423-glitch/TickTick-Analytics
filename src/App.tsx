@@ -45,6 +45,7 @@ import {
 } from './utils/analytics';
 import { generateDemoSessions } from './utils/demoData';
 import {
+  clearTickTickLocalCache,
   loadCachedProjects,
   loadCachedSessions,
   syncTickTickData,
@@ -365,13 +366,15 @@ export default function App() {
   };
 
   const handleClearCache = () => {
-    localStorage.removeItem(STORAGE_KEYS.SESSION_CACHE);
-    localStorage.removeItem(STORAGE_KEYS.PROJECTS_CACHE);
-    localStorage.removeItem(STORAGE_KEYS.LAST_SYNCED);
-    localStorage.removeItem(STORAGE_KEYS.SYNCED_MONTHS);
+    clearTickTickLocalCache();
     setCachedSessions([]);
     setProjects([]);
     setLastSyncedAt(null);
+  };
+
+  const handleForceFullResync = (next: AppSettings) => {
+    handleClearCache();
+    void runSync('full', next, true);
   };
 
   const navigateToSection = (sectionId: string) => {
@@ -871,8 +874,9 @@ export default function App() {
           }
         }}
         onTriggerFullSync={(next) => {
-          void runSync('full', next, true);
+          void runSync('full', next, false);
         }}
+        onForceFullResync={handleForceFullResync}
         onClearCache={handleClearCache}
       />
 

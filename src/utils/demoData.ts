@@ -207,11 +207,17 @@ export function generateDemoSessions(
       const matchedRuleId =
         rules?.find((r) => r.id === pool.subjectId)?.id ?? pool.subjectId;
 
+      const timerMode =
+        duration === 25 || duration === 50 || (duration <= 60 && rng() < 0.65)
+          ? 'Pomodoro'
+          : 'Stopwatch';
+
       sessions.push({
         id: `demo-${seq++}`,
         startTime: start.toISOString(),
         endTime: end.toISOString(),
         durationMinutes: duration,
+        timerMode,
         title: task.title,
         note: task.note,
         projectId: pool.projectId,

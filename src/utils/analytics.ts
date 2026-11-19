@@ -140,10 +140,10 @@ export function mergeAndDeduplicateSessions(
 ): FocusSession[] {
   const map = new Map<string, FocusSession>();
   for (const s of existing) {
-    map.set(s.id, s);
+    map.set(s.id, { ...s, timerMode: s.timerMode ?? 'Pomodoro' });
   }
   for (const s of incoming) {
-    map.set(s.id, s);
+    map.set(s.id, { ...s, timerMode: s.timerMode ?? 'Pomodoro' });
   }
   return Array.from(map.values()).sort(
     (a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime()
@@ -940,6 +940,7 @@ export function sessionsToCSV(
     'Start Time',
     'End Time',
     'Duration (min)',
+    'Timer Mode',
     'Subject',
     'Project',
     'Task / Note',
@@ -955,6 +956,7 @@ export function sessionsToCSV(
       `${pad2(start.getHours())}:${pad2(start.getMinutes())}`,
       `${pad2(end.getHours())}:${pad2(end.getMinutes())}`,
       Math.round(s.durationMinutes),
+      s.timerMode || 'Pomodoro',
       subjectNameById[s.subjectId] || 'General',
       s.projectName || '',
       s.note && s.note !== s.title ? `${s.title} — ${s.note}` : s.title,
@@ -977,6 +979,7 @@ export function sessionsToJSON(
     startTime: s.startTime,
     endTime: s.endTime,
     durationMinutes: Math.round(s.durationMinutes),
+    timerMode: s.timerMode || 'Pomodoro',
     subject: subjectNameById[s.subjectId] || 'General',
     projectName: s.projectName || null,
     title: s.title,

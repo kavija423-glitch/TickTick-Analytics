@@ -14,7 +14,7 @@ interface SessionLogTableProps {
   rules: SubjectRule[];
 }
 
-type SortField = 'date' | 'duration' | 'subject' | 'title';
+type SortField = 'date' | 'duration' | 'mode' | 'subject' | 'title';
 type SortDir = 'asc' | 'desc';
 
 const PAGE_SIZE = 12;
@@ -42,10 +42,12 @@ export function SessionLogTable({ sessions, rules }: SessionLogTableProps) {
     const list = q
       ? sessions.filter((s) => {
           const subjectName = (ruleMap[s.subjectId]?.name || 'General').toLowerCase();
+          const modeLabel = (s.timerMode || 'Pomodoro').toLowerCase();
           return (
             s.title.toLowerCase().includes(q) ||
             s.note.toLowerCase().includes(q) ||
             subjectName.includes(q) ||
+            modeLabel.includes(q) ||
             (s.projectName || '').toLowerCase().includes(q) ||
             toLocalDateKey(new Date(s.startTime)).includes(q)
           );
@@ -58,6 +60,8 @@ export function SessionLogTable({ sessions, rules }: SessionLogTableProps) {
         cmp = new Date(a.startTime).getTime() - new Date(b.startTime).getTime();
       } else if (sortField === 'duration') {
         cmp = a.durationMinutes - b.durationMinutes;
+      } else if (sortField === 'mode') {
+        cmp = (a.timerMode || 'Pomodoro').localeCompare(b.timerMode || 'Pomodoro');
       } else if (sortField === 'subject') {
         const sa = ruleMap[a.subjectId]?.name || 'General';
         const sb = ruleMap[b.subjectId]?.name || 'General';
@@ -143,7 +147,7 @@ export function SessionLogTable({ sessions, rules }: SessionLogTableProps) {
                 setSearch(e.target.value);
                 setPage(1);
               }}
-              placeholder="Search task, note, subject…"
+              placeholder="Search task, subject, Pomodoro, Stopwatch…"
               className="w-full pl-8 pr-3 py-1.5 text-xs rounded-lg bg-slate-50 dark:bg-[#171B24] border border-slate-200 dark:border-[#242B3A] text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500"
             />
           </div>
@@ -198,6 +202,16 @@ export function SessionLogTable({ sessions, rules }: SessionLogTableProps) {
               <th className="py-2.5 px-3">
                 <button
                   type="button"
+                  onClick={() => toggleSort('mode')}
+                  className="inline-flex items-center gap-1 hover:text-slate-900 dark:hover:text-slate-100 cursor-pointer"
+                >
+                  Mode
+                  <ArrowUpDown className="w-3 h-3" aria-hidden="true" />
+                </button>
+              </th>
+              <th className="py-2.5 px-3">
+                <button
+                  type="button"
                   onClick={() => toggleSort('subject')}
                   className="inline-flex items-center gap-1 hover:text-slate-900 dark:hover:text-slate-100 cursor-pointer"
                 >
@@ -221,7 +235,7 @@ export function SessionLogTable({ sessions, rules }: SessionLogTableProps) {
             {pageItems.length === 0 ? (
               <tr>
                 <td
-                  colSpan={4}
+                  colSpan={5}
                   className="py-10 text-center text-slate-500 dark:text-slate-400"
                 >
                   No focus sessions match your current filters.
@@ -240,6 +254,7 @@ export function SessionLogTable({ sessions, rules }: SessionLogTableProps) {
                 const rule = ruleMap[session.subjectId];
                 const subjectName = rule?.name || 'General';
                 const subjectColor = rule?.color || '#94A3B8';
+                const timerMode = session.timerMode || 'Pomodoro';
 
                 return (
                   <tr
@@ -264,6 +279,9 @@ export function SessionLogTable({ sessions, rules }: SessionLogTableProps) {
                       >
                         {formatDuration(session.durationMinutes)}
                       </span>
+                    </td>
+                    <td className="py-2.5 px-3 whitespace-nowrap text-slate-600 dark:text-slate-300 font-mono text-[11px]">
+                      {timerMode}
                     </td>
                     <td className="py-2.5 px-3 whitespace-nowrap">
                       <span className="inline-flex items-center gap-2 text-slate-700 dark:text-slate-200 font-medium">

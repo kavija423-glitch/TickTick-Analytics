@@ -18,6 +18,7 @@ import {
 } from './analytics';
 import { DEFAULT_SUBJECT_RULES } from './defaults';
 import { generateDemoSessions } from './demoData';
+import { computeFocusedDurationMinutes, normalizeFocusRecord } from '../services/ticktick';
 import type { FocusSession } from '../types/focus';
 
 function makeSession(overrides: Partial<FocusSession> & { id: string; startTime: string; durationMinutes: number }): FocusSession {
@@ -28,6 +29,7 @@ function makeSession(overrides: Partial<FocusSession> & { id: string; startTime:
     startTime: start.toISOString(),
     endTime: end.toISOString(),
     durationMinutes: overrides.durationMinutes,
+    timerMode: overrides.timerMode ?? 'Pomodoro',
     title: overrides.title ?? 'Study Block',
     note: overrides.note ?? '',
     projectId: overrides.projectId,
@@ -196,5 +198,96 @@ test('demo dataset generates 6 months of deterministic analytics across all view
   assert.ok(trends.length >= 60);
 
   const csv = sessionsToCSV(current.slice(0, 2), { 'combined-maths': 'Combined Maths' });
-  assert.ok(csv.startsWith('ID,Date,Start Time,End Time,Duration (min),Subject,Project,Task / Note,Tags'));
+  assert.ok(
+    csv.startsWith('ID,Date,Start Time,End Time,Duration (min),Timer Mode,Subject,Project,Task / Note,Tags')
+  );
+});
+
+test('computeFocusedDurationMinutes prioritizes actual focused duration over endTime - startTime (excludes pauses)', () => {
+  // Wall-clock span is 75 minutes, but API reports 2700 seconds (45 min) of actual focused time (30 min paused)
+  const pausedPomodoro = computeFocusedDurationMinutes({
+    startTime: '2026-11-19T08:00:00.000Z',
+    endTime: '2026-11-19T09:15:00.000Z',
+    duration: 2700,
+  });
+  assert.equal(pausedPomodoro, 45);
+
+  // Explicit focusDuration in ms (e.g. 50 min = 3,000,000 ms) over 80m wall clock
+  const msDuration = computeFocusedDurationMinutes({
+    startTime: '2026-11-19T10:00:00.000Z',
+    endTime: '2026-11-19T11:20:00.000Z',
+    focusDuration: 3_000_000,
+  });
+  assert.equal(msDuration, 50);
+
+  // Wall clock minus pauseDuration when explicit duration is omitted (90m wall clock - 20m pause = 70m)
+  const withPauseDuration = computeFocusedDurationMinutes({
+    startTime: '2026-11-19T14:00:00.000Z',
+    endTime: '2026-11-19T15:30:00.000Z',
+    pauseDuration: 1200,
+  });
+  assert.equal(withPauseDuration, 70);
+
+  // Wall clock minus pauses[] intervals (60m wall clock - 15m pause = 45m)
+  const withPausesArray = computeFocusedDurationMinutes({
+    startTime: '2026-11-19T16:00:00.000Z',
+    endTime: '2026-11-19T17:00:00.000Z',
+    pauses: [
+      { startTime: '2026-11-19T16:20:00.000Z', endTime: '2026-11-19T16:35:00.000Z' },
+    ],
+  });
+  assert.equal(withPausesArray, 45);
+});
+
+test('normalizeFocusRecord tags Pomodoro (type=0) and Stopwatch (type=1) and deduplicates merged results by ID', () => {
+  const settings = { subjectRules: DEFAULT_SUBJECT_RULES };
+  const projectMap = { p1: 'Physics' };
+
+  const pomo = normalizeFocusRecord(
+    {
+      id: 'sess-pomo-1',
+      startTime: '2026-11-19T08:00:00.000Z',
+      endTime: '2026-11-19T09:05:00.000Z', // 65m wall clock
+      duration: 3000, // 50m actual focus (15m paused)
+      projectId: 'p1',
+      title: 'Waves Past Paper',
+    },
+    settings,
+    projectMap,
+    'Pomodoro'
+  );
+
+  const stopwatch = normalizeFocusRecord(
+    {
+      id: 'sess-sw-1',
+      startTime: '2026-11-19T10:00:00.000Z',
+      endTime: '2026-11-19T11:30:00.000Z', // 90m wall clock
+      duration: 4200, // 70m actual focus (20m paused)
+      title: 'SQL Joins Practice',
+      tags: ['ict'],
+    },
+    settings,
+    projectMap,
+    'Stopwatch'
+  );
+
+  assert.ok(pomo);
+  assert.ok(stopwatch);
+  assert.equal(pomo.timerMode, 'Pomodoro');
+  assert.equal(pomo.durationMinutes, 50);
+  assert.equal(pomo.subjectId, 'physics');
+  assert.equal(stopwatch.timerMode, 'Stopwatch');
+  assert.equal(stopwatch.durationMinutes, 70);
+  assert.equal(stopwatch.subjectId, 'ict');
+
+  // Merge both streams with a duplicate ID and verify deduplication
+  const merged = mergeAndDeduplicateSessions([pomo], [pomo, stopwatch]);
+  assert.equal(merged.length, 2);
+  assert.deepEqual(
+    merged.map((m) => [m.id, m.timerMode, m.durationMinutes]),
+    [
+      ['sess-sw-1', 'Stopwatch', 70],
+      ['sess-pomo-1', 'Pomodoro', 50],
+    ]
+  );
 });
