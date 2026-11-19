@@ -1,12 +1,12 @@
 import { GoogleGenAI, ThinkingLevel } from '@google/genai';
 import { extractErrorMessageFromRaw, HttpResponseError } from '../utils/http';
 
-export type CoachModelId = 'gemini-4-hydrogen' | 'gemini-3.1-flash-lite';
+export type CoachModelId = 'gemini-4-hydrogen' | 'gemini-3.5-flash-lite';
 
-export const COACH_MODELS: Record<'standard' | 'fast', CoachModelId> = {
-  standard: 'gemini-4-hydrogen',
-  fast: 'gemini-3.1-flash-lite',
-};
+export const COACH_MODELS = {
+  hydrogen: 'gemini-4-hydrogen',
+  flashLite: 'gemini-3.5-flash-lite',
+} as const satisfies Record<string, CoachModelId>;
 
 export interface CoachHistoryMessage {
   role: 'user' | 'model';
@@ -106,7 +106,7 @@ export function formatGeminiError(err: unknown): string {
   }
 
   if (status === 429 || rawMessage.includes('RESOURCE_EXHAUSTED')) {
-    return `Gemini API rate limit or quota exceeded${statusPrefix}: ${extracted || 'Wait a moment or switch to Fast mode (gemini-3.1-flash-lite).'}`;
+    return `Gemini API rate limit or quota exceeded${statusPrefix}: ${extracted || 'Wait a moment or switch to 3.5 Flash-Lite (gemini-3.5-flash-lite).'}`;
   }
 
   if (status === 404 || rawMessage.includes('NOT_FOUND')) {

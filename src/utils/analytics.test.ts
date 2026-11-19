@@ -391,8 +391,8 @@ test('parseJsonResponseSafely reads raw text first and reports status + real err
 });
 
 test('resolveGeminiApiKey prefers localStorage key and only falls back to env key in AI Studio preview', () => {
-  assert.equal(COACH_MODELS.standard, 'gemini-4-hydrogen');
-  assert.equal(COACH_MODELS.fast, 'gemini-3.1-flash-lite');
+  assert.equal(COACH_MODELS.hydrogen, 'gemini-4-hydrogen');
+  assert.equal(COACH_MODELS.flashLite, 'gemini-3.5-flash-lite');
 
   // Prefers stored key in both preview and production
   assert.equal(resolveGeminiApiKey('AIza-user-key', 'AIza-env-key', true), 'AIza-user-key');

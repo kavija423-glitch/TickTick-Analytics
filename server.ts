@@ -81,7 +81,7 @@ interface ChatRequestBody {
   focusContext?: string;
 }
 
-const ALLOWED_CHAT_MODELS = new Set(['gemini-4-hydrogen', 'gemini-3.1-flash-lite']);
+const ALLOWED_CHAT_MODELS = new Set(['gemini-4-hydrogen', 'gemini-3.5-flash-lite']);
 
 app.post('/api/chat', async (req, res) => {
   const body = (req.body ?? {}) as ChatRequestBody;

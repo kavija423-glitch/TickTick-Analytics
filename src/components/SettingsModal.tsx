@@ -291,7 +291,7 @@ export function SettingsModal({
                   </button>
                 </div>
                 <p className="mt-1.5 text-[11px] text-slate-500 dark:text-slate-400">
-                  Stored locally in <code className="font-mono">localStorage</code> and used directly from your browser for Focus Coach (<code className="font-mono">gemini-4-hydrogen</code> / <code className="font-mono">gemini-3.1-flash-lite</code>). Required on static deployments like Cloudflare Pages.
+                  Stored locally in <code className="font-mono">localStorage</code> and used directly from your browser for Focus Coach (<code className="font-mono">gemini-4-hydrogen</code> / <code className="font-mono">gemini-3.5-flash-lite</code>). Required on static deployments like Cloudflare Pages.
                 </p>
               </div>
 

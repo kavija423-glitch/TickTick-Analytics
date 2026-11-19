@@ -590,6 +590,7 @@ export default function App() {
             <button
               type="button"
               onClick={() => setCoachOpen(true)}
+              aria-label="Focus Coach"
               className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-slate-200 dark:border-[#242B3A] bg-white dark:bg-[#141822] text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-[#1B202C] transition-colors whitespace-nowrap shrink-0 cursor-pointer"
             >
               <Bot className="w-3.5 h-3.5 text-indigo-500" aria-hidden="true" />
