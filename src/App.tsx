@@ -93,7 +93,7 @@ export default function App() {
   const [projects, setProjects] = useState<TickTickProject[]>(loadCachedProjects);
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(loadLastSynced);
 
-  const [timeframe, setTimeframe] = useState<TimeframePreset>('last_90_days');
+  const [timeframe, setTimeframe] = useState<TimeframePreset>('this_week');
   const [selectedSubjectId, setSelectedSubjectId] = useState<string>('all');
   const [trendGranularity, setTrendGranularity] = useState<TrendGranularity>('daily');
   const [activeNav, setActiveNav] = useState<string>('overview');
@@ -326,7 +326,7 @@ export default function App() {
   );
 
   const timeframeLabel =
-    TIMEFRAME_OPTIONS.find((t) => t.id === timeframe)?.label || 'Last 90 Days';
+    TIMEFRAME_OPTIONS.find((t) => t.id === timeframe)?.label || 'This Week';
   const subjectFilterLabel =
     selectedSubjectId === 'all'
       ? 'All Subjects'
